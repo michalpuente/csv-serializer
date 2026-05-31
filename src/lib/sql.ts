@@ -12,11 +12,30 @@ function asciiTransliterate(input: string): string {
 }
 
 export function normalizeIdentifier(raw: string, fallback = 'col'): string {
-  const cleaned = asciiTransliterate(raw.trim().replace(/^#+/, ''))
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .replace(/_+/g, '_');
+  const source = asciiTransliterate(raw.trim().replace(/^#+/, '')).toLowerCase();
+  let cleaned = '';
+  let lastUnderscore = false;
+
+  for (const char of source) {
+    const isAlphaNum = (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9');
+    if (isAlphaNum) {
+      cleaned += char;
+      lastUnderscore = false;
+      continue;
+    }
+
+    if (!lastUnderscore) {
+      cleaned += '_';
+      lastUnderscore = true;
+    }
+  }
+
+  while (cleaned.startsWith('_')) {
+    cleaned = cleaned.slice(1);
+  }
+  while (cleaned.endsWith('_')) {
+    cleaned = cleaned.slice(0, -1);
+  }
 
   const base = cleaned || fallback;
   return /^[a-z_]/.test(base) ? base : `${fallback}_${base}`;

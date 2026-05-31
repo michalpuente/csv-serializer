@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run src/**/*.test.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
@@ -26,7 +26,9 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@types/escape-html": "^1.0.4",
     "csv-parse": "^6.2.1",
+    "escape-html": "^1.0.3",
     "express": "^5.2.1",
     "iconv-lite": "^0.7.2",
     "jschardet": "^3.1.4",

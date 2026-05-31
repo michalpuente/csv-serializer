@@ -16,7 +16,6 @@ const REPAIR_MAP: Array<[RegExp, string]> = [
   [/Æ/g, 'Ć'],
   [/ñ/g, 'ń'],
   [/Ñ/g, 'Ń'],
-  [/ó/g, 'ó'],
 ];
 
 export function repairPolishMojibake(input: string): string {

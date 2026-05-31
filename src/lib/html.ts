@@ -1,10 +1,7 @@
+import escape from 'escape-html';
+
 export function escapeHtml(value: unknown): string {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+  return escape(String(value ?? ''));
 }
 
 export function layout(title: string, body: string): string {

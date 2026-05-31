@@ -63,7 +63,7 @@ export function detectHeaderLine(lines: string[], delimiter: string): number {
     const cols = line.split(delimiter).map((cell) => cell.trim());
     if (cols.length < 4) continue;
     const hashCount = cols.filter((c) => c.startsWith('#')).length;
-    const bankingNames = cols.filter((c) => /data|kwota|saldo|tytu|opis|konto|nadawca|odbiorca/i.test(c)).length;
+    const bankingNames = cols.filter((c) => /data|kwota|saldo|tytul|tytuł|opis|konto|nadawca|odbiorca/i.test(c)).length;
     if (hashCount >= 2 || bankingNames >= 2) {
       return i;
     }

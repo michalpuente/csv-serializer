@@ -1,5 +1,4 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
 import { config } from './lib/config.js';
@@ -22,13 +21,8 @@ type Dataset = {
   header_row_json: Array<{ original: string; key: string; isDateLike: boolean; isAmountLike: boolean }>;
 };
 
-await fs.mkdir(path.join(process.cwd(), 'src/uploads'), { recursive: true });
-
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, path.join(process.cwd(), 'src/uploads')),
-    filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_')}`),
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: config.maxUploadBytes },
   fileFilter: (_req, file, cb) => {
     const ok = /\.(csv|txt)$/i.test(file.originalname) || /text|csv|octet-stream/i.test(file.mimetype);
@@ -40,6 +34,24 @@ const upload = multer({
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+const uploadRateWindowMs = 10_000;
+const uploadRateMax = 30;
+const uploadHits = new Map<string, number[]>();
+
+function uploadRateLimit(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const now = Date.now();
+  const key = req.ip || 'local';
+  const prev = uploadHits.get(key) ?? [];
+  const recent = prev.filter((v) => now - v < uploadRateWindowMs);
+  recent.push(now);
+  uploadHits.set(key, recent);
+  if (recent.length > uploadRateMax) {
+    res.status(429).json({ error: 'Too many requests, try again shortly.' });
+    return;
+  }
+  next();
+}
 
 app.get('/', (_req, res) => {
   res.send(
@@ -129,7 +141,13 @@ async function tick() {
   document.getElementById('progress').value = data.progress_percent;
   document.getElementById('counts').textContent =
     'scanned=' + data.rows_scanned + ', normalized=' + data.rows_normalized + ', inserted=' + data.rows_inserted + ', duplicates=' + data.rows_duplicates + ', invalid=' + data.rows_invalid;
-  document.getElementById('events').innerHTML = (data.events || []).map((e) => '<li>' + e.created_at + ': ' + e.message + '</li>').join('');
+  const eventsList = document.getElementById('events');
+  eventsList.textContent = '';
+  for (const e of (data.events || [])) {
+    const li = document.createElement('li');
+    li.textContent = e.created_at + ': ' + e.message;
+    eventsList.appendChild(li);
+  }
   if (data.dataset_id) {
     const a = document.getElementById('dataset-link');
     a.href = '/datasets/' + data.dataset_id;
@@ -179,6 +197,11 @@ app.get('/datasets/:id', async (req, res) => {
     `SELECT * FROM ${quoteIdentifier(dataset.table_name)} WHERE ${where.join(' AND ')} ORDER BY ${quoteIdentifier(sortKey)} DESC LIMIT ${pageSize} OFFSET ${offset}`,
     values,
   );
+  const nextPageHref = `?${new URLSearchParams({
+    q,
+    sort: sortKey,
+    page: String(page + 1),
+  }).toString()}`;
 
   const tableHeader = ['id', ...headers.map((h) => h.key)].map((h) => `<th>${escapeHtml(h)}</th>`).join('');
   const bodyRows = rows
@@ -202,20 +225,18 @@ app.get('/datasets/:id', async (req, res) => {
   <button type="submit">Apply</button>
 </form>
 <table><thead><tr>${tableHeader}</tr></thead><tbody>${bodyRows}</tbody></table>
-<p><a href="?q=${encodeURIComponent(q)}&sort=${encodeURIComponent(sortKey)}&page=${page + 1}">Next page</a></p>`,
+<p><a href="${escapeHtml(nextPageHref)}">Next page</a></p>`,
     ),
   );
 });
 
-app.post('/api/uploads', upload.single('file'), async (req, res) => {
+app.post('/api/uploads', uploadRateLimit, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' });
       return;
     }
-
-    const buffer = await fs.readFile(req.file.path);
-    const preview = parsePreviewFromBuffer(buffer);
+    const preview = parsePreviewFromBuffer(req.file.buffer);
     res.json({
       detected_encoding: preview.encoding,
       delimiter: preview.delimiter,
@@ -224,11 +245,12 @@ app.post('/api/uploads', upload.single('file'), async (req, res) => {
       header_row_index: preview.headerLineIndex,
     });
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to preview file' });
+    console.error(error);
+    res.status(400).json({ error: 'Failed to preview file' });
   }
 });
 
-app.post('/api/imports', upload.single('file'), async (req, res) => {
+app.post('/api/imports', uploadRateLimit, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' });
@@ -248,15 +270,16 @@ app.post('/api/imports', upload.single('file'), async (req, res) => {
 
     void startImport({
       jobId,
-      filename: req.file.originalname,
-      filePath: req.file.path,
+      filename: `${crypto.randomUUID()}-${req.file.originalname}`,
+      fileBuffer: req.file.buffer,
       requestedTableName: tableName,
       replaceExisting,
     });
 
     res.status(202).json({ jobId });
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to start import' });
+    console.error(error);
+    res.status(400).json({ error: 'Failed to start import' });
   }
 });
 
@@ -307,13 +330,9 @@ app.get('/api/datasets/:id/rows', async (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/datasets/:id/summary', async (req, res) => {
-  const dataset = (await query<Dataset>('SELECT * FROM imported_datasets WHERE id = $1', [Number(req.params.id)]))[0];
-  if (!dataset) {
-    res.status(404).json({ error: 'Dataset not found' });
-    return;
-  }
-
+async function buildDatasetSummary(datasetId: number): Promise<Record<string, unknown> | null> {
+  const dataset = (await query<Dataset>('SELECT * FROM imported_datasets WHERE id = $1', [datasetId]))[0];
+  if (!dataset) return null;
   const headers = dataset.header_row_json ?? [];
   const amountColumn = headers.find((h) => h.isAmountLike)?.key;
   const counterpartyColumn = headers.find((h) => /nadawca|odbiorca|counterparty/i.test(h.key))?.key;
@@ -354,7 +373,7 @@ app.get('/api/datasets/:id/summary', async (req, res) => {
       )
     : [];
 
-  res.json({
+  return {
     dataset_name: dataset.table_name,
     source_filename: dataset.original_filename,
     import_date: dataset.created_at,
@@ -366,17 +385,24 @@ app.get('/api/datasets/:id/summary', async (req, res) => {
     detected_date_range: dateRange,
     amount_totals: totals,
     top_counterparties: topCounterparties,
-  });
+  };
+}
+
+app.get('/api/datasets/:id/summary', async (req, res) => {
+  const summary = await buildDatasetSummary(Number(req.params.id));
+  if (!summary) {
+    res.status(404).json({ error: 'Dataset not found' });
+    return;
+  }
+  res.json(summary);
 });
 
 app.get('/api/datasets/:id/summary.csv', async (req, res) => {
-  const response = await fetch(`http://127.0.0.1:${config.port}/api/datasets/${req.params.id}/summary`);
-  if (!response.ok) {
-    res.status(response.status).send(await response.text());
+  const summary = await buildDatasetSummary(Number(req.params.id));
+  if (!summary) {
+    res.status(404).json({ error: 'Dataset not found' });
     return;
   }
-
-  const summary = (await response.json()) as Record<string, unknown>;
   const rows = [
     ['metric', 'value'],
     ['dataset_name', summary.dataset_name],

@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import { query } from './db.js';
 import { parsePreviewFromBuffer } from './parser.js';
 import { buildRowHash, normalizeTextValue, parseAmount, parseDate } from './normalization.js';
@@ -7,7 +6,7 @@ import { normalizeTableName, quoteIdentifier } from './sql.js';
 type StartImportInput = {
   jobId: number;
   filename: string;
-  filePath: string;
+  fileBuffer: Buffer;
   requestedTableName: string;
   replaceExisting: boolean;
 };
@@ -55,8 +54,7 @@ export async function startImport(input: StartImportInput): Promise<void> {
     await logEvent(input.jobId, 'info', 'File received');
 
     const tableName = normalizeTableName(input.requestedTableName);
-    const buffer = await fs.readFile(input.filePath);
-    const preview = parsePreviewFromBuffer(buffer);
+    const preview = parsePreviewFromBuffer(input.fileBuffer);
 
     await updateJob(input.jobId, { encoding_detected: true, structure_detected: true, progress_percent: 20, message: 'Structure detected' });
     await logEvent(input.jobId, 'info', `Detected encoding: ${preview.encoding}`);
@@ -87,10 +85,9 @@ export async function startImport(input: StartImportInput): Promise<void> {
 
     await updateJob(input.jobId, { dataset_id: datasetId });
 
-    const lines = preview.normalizedText.split(/\r?\n/).slice(preview.headerLineIndex);
-    const csvRows = lines
-      .join('\n')
+    const csvRows = preview.normalizedText
       .split(/\r?\n/)
+      .slice(preview.headerLineIndex)
       .filter((line) => line.trim() && !line.trimStart().startsWith('#Podsumowanie'));
 
     const dataRows = csvRows.slice(1);
