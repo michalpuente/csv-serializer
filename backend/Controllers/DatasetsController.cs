@@ -90,10 +90,18 @@ public class DatasetsController : ControllerBase
 
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : "";
 
-        var validSort = dataset.HeaderRowJson.Contains(sort) ? $"\"{sort}\"" : "id";
+        // Whitelist sort column against known headers to prevent injection
+        var validSort = sort != null && dataset.HeaderRowJson.Contains(sort) ? $"\"{sort}\"" : "id";
         var orderClause = $"ORDER BY {validSort}";
 
-        var sql = $"SELECT * FROM {quotedTable} {whereClause} {orderClause} LIMIT {limit} OFFSET {offset}";
+        // Parameterize limit and offset
+        var limitParam = $"${paramIdx}";
+        parameters.Add(new NpgsqlParameter { Value = limit });
+        paramIdx++;
+        var offsetParam = $"${paramIdx}";
+        parameters.Add(new NpgsqlParameter { Value = offset });
+
+        var sql = $"SELECT * FROM {quotedTable} {whereClause} {orderClause} LIMIT {limitParam} OFFSET {offsetParam}";
 
         var conn = (NpgsqlConnection)_db.Database.GetDbConnection();
         if (conn.State != System.Data.ConnectionState.Open)

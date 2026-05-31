@@ -7,7 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 
 var connStr = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Host=localhost;Port=5432;Database=csv_serializer;Username=postgres;******";
+    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
 builder.Services.AddDbContext<AppDbContext>(opt => opt.UseNpgsql(connStr));
 
 builder.Services.AddSingleton<ImportService>();
