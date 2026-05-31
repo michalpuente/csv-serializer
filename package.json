@@ -1,0 +1,46 @@
+{
+  "name": "csv-serializer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/michalpuente/csv-serializer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/michalpuente/csv-serializer/issues"
+  },
+  "homepage": "https://github.com/michalpuente/csv-serializer#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "csv-parse": "^6.2.1",
+    "express": "^5.2.1",
+    "iconv-lite": "^0.7.2",
+    "jschardet": "^3.1.4",
+    "multer": "^2.1.1",
+    "pg": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.9.1",
+    "@types/pg": "^8.20.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}
