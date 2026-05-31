@@ -1,11 +1,24 @@
-FROM node:22-alpine
+# Backend build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
+WORKDIR /src
+COPY backend/*.csproj ./
+RUN dotnet restore
+COPY backend/ ./
+RUN dotnet publish -c Release -o /app/backend
+
+# Frontend build
+FROM node:22-alpine AS frontend-build
 WORKDIR /app
-COPY package*.json ./
+COPY frontend/package*.json ./
 RUN npm ci
-COPY tsconfig.json ./
-COPY src ./src
-COPY README.md ./README.md
-COPY .env.example ./.env.example
+COPY frontend/ ./
 RUN npm run build
-EXPOSE 3000
-CMD ["sh", "-c", "npm run migrate && npm run start"]
+
+# Runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=backend-build /app/backend ./
+COPY --from=frontend-build /app/build ./wwwroot
+EXPOSE 5000
+ENV ASPNETCORE_URLS=http://+:5000
+ENTRYPOINT ["dotnet", "CsvSerializer.Api.dll"]

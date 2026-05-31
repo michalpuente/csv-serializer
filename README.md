@@ -1,47 +1,87 @@
-# csv-serializer
+# CSV Serializer
 
-Dockerized Node.js + PostgreSQL app for importing malformed Polish bank CSV-like files, repairing text, deduplicating full normalized rows, searching data, and downloading summaries.
+A web application for importing malformed bank-style CSV/TXT files into PostgreSQL with robust Polish encoding/mojibake recovery, dynamic table creation, progress tracking, search, and downloadable summaries.
 
-## Run with Docker
+## Architecture
 
-1. Copy environment file:
+- **Backend**: .NET 10 / ASP.NET Core Web API (C#)
+- **Frontend**: React 19 with TypeScript
+- **Database**: PostgreSQL 16
+- **Deployment**: Docker Compose
 
-```bash
-cp .env.example .env
-```
+## Features
 
-2. Start services:
+- Upload and preview CSV/TXT files with automatic encoding detection
+- Polish text mojibake repair (Windows-1250 → UTF-8 character recovery)
+- Automatic delimiter detection (`;`, `,`, `\t`)
+- Header row detection for Polish bank transaction formats
+- Dynamic SQL table creation with safe identifier normalization
+- Full-row SHA-256 deduplication via `ON CONFLICT (row_hash) DO NOTHING`
+- Date and amount parsing with typed derived columns
+- Real-time import job progress tracking
+- Accent-insensitive search across all imported columns
+- Dataset summaries exportable as JSON and CSV
+
+## Quick Start
 
 ```bash
 docker compose up --build
 ```
 
-3. Open `http://localhost:3000`.
+The app will be available at [http://localhost:5000](http://localhost:5000).
 
-## Features
+## Development
 
-- Upload and preview CSV/TXT imports.
-- Detect encoding, delimiter, and true transaction header row.
-- Repair common Polish mojibake patterns (`Bankowoœæ`, `£ódŸ`, `Tytu³`, etc.).
-- Dynamic destination table creation with safe SQL identifiers.
-- Row normalization + SHA-256 full-row deduplication using `row_hash` unique index.
-- Persisted import jobs with progress counters and event logs.
-- Dataset list and dataset detail page with free-text search.
-- Accent-insensitive search using PostgreSQL `unaccent`.
-- Summary export as JSON and CSV.
-
-## Local development (without Docker)
-
-Requires PostgreSQL and `DATABASE_URL` set.
+### Backend (.NET)
 
 ```bash
-npm install
-npm run migrate
-npm run dev
+cd backend
+dotnet run
 ```
 
-## Tests
+### Frontend (React)
 
 ```bash
-npm test
+cd frontend
+npm install
+npm start
+```
+
+### Tests
+
+```bash
+cd backend.tests
+dotnet test
+```
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/uploads` | Preview a CSV/TXT file |
+| `POST` | `/api/imports` | Start an import job |
+| `GET` | `/api/import-jobs/:id` | Get import job status |
+| `GET` | `/api/datasets` | List all datasets |
+| `GET` | `/api/datasets/:id` | Get dataset details |
+| `GET` | `/api/datasets/:id/rows` | Query rows (paginated, searchable) |
+| `GET` | `/api/datasets/:id/summary` | Get dataset summary (JSON) |
+| `GET` | `/api/datasets/:id/summary.csv` | Download dataset summary (CSV) |
+| `GET` | `/health` | Health check |
+
+## Project Structure
+
+```
+├── backend/                  # .NET Web API
+│   ├── Controllers/          # API controllers
+│   ├── Data/                 # EF Core DbContext
+│   ├── Models/               # Entity models
+│   ├── Services/             # Business logic
+│   └── Migrations/           # EF Core migrations
+├── backend.tests/            # xUnit tests
+├── frontend/                 # React SPA
+│   └── src/
+│       ├── api/              # API client
+│       └── pages/            # React pages
+├── Dockerfile                # Multi-stage build
+└── docker-compose.yml        # Docker Compose config
 ```

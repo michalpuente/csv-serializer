@@ -1,5 +1,7 @@
-node_modules
-npm-debug.log
-dist
-.git
-.gitignore
+**/bin
+**/obj
+**/node_modules
+**/build
+**/.git
+**/.env
+**/dist
