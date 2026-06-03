@@ -20,7 +20,7 @@ services:
     ports:
       - "5000:5000"
     environment:
-      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=csv_serializer;Username=postgres;******"
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=csv_serializer;Username=postgres;Password=postgres"
     depends_on:
       postgres:
         condition: service_healthy
