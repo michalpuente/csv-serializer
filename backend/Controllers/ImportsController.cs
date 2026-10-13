@@ -50,8 +50,19 @@ public class ImportsController : ControllerBase
         await file.CopyToAsync(ms);
         var bytes = ms.ToArray();
 
+        var dataset = new ImportedDataset
+        {
+            TableName = safeTableName,
+            OriginalFilename = file.FileName,
+            Status = "queued",
+            StartedAt = DateTime.UtcNow
+        };
+        _db.ImportedDatasets.Add(dataset);
+        await _db.SaveChangesAsync();
+
         var job = new ImportJob
         {
+            DatasetId = dataset.Id,
             Status = "queued",
             Message = "Import queued"
         };

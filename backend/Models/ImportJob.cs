@@ -3,7 +3,7 @@ namespace CsvSerializer.Api.Models;
 public class ImportJob
 {
     public long Id { get; set; }
-    public long DatasetId { get; set; }
+    public long? DatasetId { get; set; }
     public ImportedDataset? Dataset { get; set; }
     public string Status { get; set; } = "queued";
     public string? Message { get; set; }

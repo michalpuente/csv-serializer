@@ -36,7 +36,7 @@ namespace CsvSerializer.Api.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<long>("DatasetId")
+                    b.Property<long?>("DatasetId")
                         .HasColumnType("bigint")
                         .HasColumnName("dataset_id");
 
@@ -216,8 +216,7 @@ namespace CsvSerializer.Api.Migrations
                     b.HasOne("CsvSerializer.Api.Models.ImportedDataset", "Dataset")
                         .WithMany()
                         .HasForeignKey("DatasetId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Dataset");
                 });

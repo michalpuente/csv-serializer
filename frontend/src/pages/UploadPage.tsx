@@ -1,6 +1,6 @@
 import React, { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { previewFile, startImport } from '../api/client';
+import { useNavigate, Link } from 'react-router-dom';
+import { previewFile, startImport, getDatasets } from '../api/client';
 
 export default function UploadPage() {
   const navigate = useNavigate();
@@ -10,6 +10,13 @@ export default function UploadPage() {
   const [preview, setPreview] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [datasets, setDatasets] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    getDatasets()
+      .then(data => setDatasets(data || []))
+      .catch(() => setDatasets([]));
+  }, []);
 
   const handlePreview = async () => {
     if (!file) return;
@@ -103,6 +110,37 @@ export default function UploadPage() {
           </table>
         </div>
       )}
+
+      <div style={{ marginTop: 24 }}>
+        <h3>Previously Imported Datasets</h3>
+        {datasets.length === 0 ? (
+          <p>No datasets yet.</p>
+        ) : (
+          <table border={1} cellPadding={4} style={{ borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Table Name</th>
+                <th>Status</th>
+                <th>Rows</th>
+              </tr>
+            </thead>
+            <tbody>
+              {datasets.slice(0, 10).map(d => (
+                <tr key={d.id}>
+                  <td>{d.id}</td>
+                  <td><Link to={`/datasets/${d.id}`}>{d.tableName}</Link></td>
+                  <td>{d.status}</td>
+                  <td>{d.insertedRows}/{d.totalRows}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p style={{ marginTop: 8 }}>
+          <Link to="/datasets">View all datasets {'->'}</Link>
+        </p>
+      </div>
     </div>
   );
 }

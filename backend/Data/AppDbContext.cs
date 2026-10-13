@@ -58,7 +58,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.FinishedAt).HasColumnName("finished_at");
             e.HasOne(x => x.Dataset)
                 .WithMany()
-                .HasForeignKey(x => x.DatasetId);
+                .HasForeignKey(x => x.DatasetId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<ImportJobEvent>(e =>
