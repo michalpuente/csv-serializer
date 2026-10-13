@@ -42,25 +42,60 @@ public class ImportService
             job.ProgressPercent = 20;
             await db.SaveChangesAsync();
             await LogEvent(db, jobId, "info", $"Headers: {string.Join(", ", parseResult.NormalizedHeaders)}. {parseResult.AllRows.Count} data rows found.");
+            await LogEvent(db, jobId, "info",
+                $"Table starts at record {parseResult.HeaderLineIndex + 1} ({(parseResult.HasHeader ? "header row" : "no header, generated column names")}); " +
+                $"skipped {parseResult.SkippedLeadingRecords} preamble and {parseResult.SkippedTrailingRecords} footer records" +
+                (parseResult.MojibakeRepaired ? "; repaired mis-encoded characters" : "") + ".");
+            if (parseResult.MismatchedRows > 0)
+                await LogEvent(db, jobId, "warning", $"{parseResult.MismatchedRows} rows had a different number of fields than the header (extra values appended to the last column).");
+            var typed = parseResult.Columns.Where(c => c.IsDate || c.IsNumeric)
+                .Select(c => $"{c.Name}:{(c.IsDate ? "date" : "number")}").ToList();
+            if (typed.Count > 0)
+                await LogEvent(db, jobId, "info", $"Typed columns: {string.Join(", ", typed)}");
 
             var safeTableName = SqlIdentifierService.NormalizeTableName(tableName);
 
-            var dataset = new ImportedDataset
+            ImportedDataset? dataset = null;
+            if (job.DatasetId.HasValue)
             {
-                TableName = safeTableName,
-                OriginalFilename = "upload",
-                Status = "processing",
-                DetectedEncoding = parseResult.Encoding,
-                Delimiter = parseResult.Delimiter,
-                HeaderRowJson = parseResult.NormalizedHeaders,
-                TotalRows = parseResult.AllRows.Count,
-                StartedAt = DateTime.UtcNow
-            };
+                dataset = await db.ImportedDatasets.FindAsync(job.DatasetId.Value);
+            }
+
+            if (dataset == null)
+            {
+                dataset = new ImportedDataset
+                {
+                    TableName = safeTableName,
+                    OriginalFilename = "upload",
+                    Status = "processing",
+                    DetectedEncoding = parseResult.Encoding,
+                    Delimiter = parseResult.Delimiter,
+                    HeaderRowJson = parseResult.NormalizedHeaders,
+                    TotalRows = parseResult.AllRows.Count,
+                    StartedAt = DateTime.UtcNow
+                };
+                db.ImportedDatasets.Add(dataset);
+                await db.SaveChangesAsync();
+
+                job.DatasetId = dataset.Id;
+                await db.SaveChangesAsync();
+            }
+            else
+            {
+                dataset.TableName = safeTableName;
+                dataset.Status = "processing";
+                dataset.DetectedEncoding = parseResult.Encoding;
+                dataset.Delimiter = parseResult.Delimiter;
+                dataset.HeaderRowJson = parseResult.NormalizedHeaders;
+                dataset.TotalRows = parseResult.AllRows.Count;
+                dataset.StartedAt ??= DateTime.UtcNow;
+                await db.SaveChangesAsync();
+            }
 
             if (replaceExisting)
             {
                 var existing = await db.ImportedDatasets
-                    .FirstOrDefaultAsync(d => d.TableName == safeTableName);
+                    .FirstOrDefaultAsync(d => d.TableName == safeTableName && d.Id != dataset.Id);
                 if (existing != null)
                 {
                     await DropTableIfExists(db, safeTableName);
@@ -69,13 +104,7 @@ public class ImportService
                 }
             }
 
-            db.ImportedDatasets.Add(dataset);
-            await db.SaveChangesAsync();
-
-            job.DatasetId = dataset.Id;
-            await db.SaveChangesAsync();
-
-            await CreateDynamicTable(db, safeTableName, parseResult.NormalizedHeaders, parseResult.AllRows);
+            await CreateDynamicTable(db, safeTableName, parseResult.Columns);
             await LogEvent(db, jobId, "info", $"Table \"{safeTableName}\" created.");
 
             job.ProgressPercent = 40;
@@ -83,30 +112,55 @@ public class ImportService
             await db.SaveChangesAsync();
 
             int inserted = 0, duplicates = 0, invalid = 0;
+            var occurrences = new Dictionary<string, int>();
+            var rejections = new List<string>();
+            const int batchSize = 500;
 
-            for (int i = 0; i < parseResult.AllRows.Count; i++)
+            var conn = (NpgsqlConnection)db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            for (int start = 0; start < parseResult.AllRows.Count; start += batchSize)
             {
-                var row = parseResult.AllRows[i];
-                try
+                await using (var tx = await conn.BeginTransactionAsync())
                 {
-                    var wasInserted = await InsertRow(db, safeTableName, parseResult.NormalizedHeaders, row, dataset.Id);
-                    if (wasInserted) inserted++; else duplicates++;
-                }
-                catch (Exception ex)
-                {
-                    invalid++;
-                    _logger.LogWarning(ex, "Invalid row {Index}", i);
+                    int end = Math.Min(start + batchSize, parseResult.AllRows.Count);
+                    for (int i = start; i < end; i++)
+                    {
+                        var row = parseResult.AllRows[i];
+                        // Identical rows are legitimate (e.g. two equal card fees on one day); number them instead of dropping.
+                        var baseHash = NormalizationService.ComputeRowHash(row);
+                        occurrences[baseHash] = occurrences.TryGetValue(baseHash, out var n) ? n + 1 : 0;
+                        var rowHash = occurrences[baseHash] == 0 ? baseHash : NormalizationService.ComputeRowHash(row, occurrences[baseHash]);
+
+                        await using var savepoint = new NpgsqlCommand("SAVEPOINT row_sp", conn, tx);
+                        await savepoint.ExecuteNonQueryAsync();
+                        try
+                        {
+                            var wasInserted = await InsertRow(conn, tx, safeTableName, parseResult.Columns, row, dataset.Id, rowHash);
+                            if (wasInserted) inserted++; else duplicates++;
+                        }
+                        catch (Exception ex)
+                        {
+                            await using var rollback = new NpgsqlCommand("ROLLBACK TO SAVEPOINT row_sp", conn, tx);
+                            await rollback.ExecuteNonQueryAsync();
+                            invalid++;
+                            _logger.LogWarning(ex, "Invalid row {Index}", i);
+                            if (rejections.Count < 5) rejections.Add($"Row {i + 1} rejected: {ex.Message}");
+                        }
+                    }
+                    await tx.CommitAsync();
                 }
 
-                if (i % 100 == 0)
-                {
-                    job.RowsInserted = inserted;
-                    job.RowsDuplicates = duplicates;
-                    job.RowsInvalid = invalid;
-                    job.ProgressPercent = 40 + (int)(55.0 * i / parseResult.AllRows.Count);
-                    await db.SaveChangesAsync();
-                }
+                job.RowsInserted = inserted;
+                job.RowsDuplicates = duplicates;
+                job.RowsInvalid = invalid;
+                job.ProgressPercent = 40 + (int)(55.0 * Math.Min(start + batchSize, parseResult.AllRows.Count) / parseResult.AllRows.Count);
+                await db.SaveChangesAsync();
             }
+
+            foreach (var rejection in rejections)
+                await LogEvent(db, jobId, "warning", rejection);
 
             job.RowsInserted = inserted;
             job.RowsDuplicates = duplicates;
@@ -154,7 +208,7 @@ public class ImportService
         await db.Database.ExecuteSqlRawAsync($"DROP TABLE IF EXISTS {quotedName} CASCADE");
     }
 
-    private static async Task CreateDynamicTable(AppDbContext db, string tableName, List<string> headers, List<List<string?>> rows)
+    private static async Task CreateDynamicTable(AppDbContext db, string tableName, List<ColumnProfile> columns)
     {
         var quotedName = $"\"{tableName}\"";
         var columnDefs = new List<string>
@@ -163,34 +217,12 @@ public class ImportService
             "dataset_id BIGINT NOT NULL"
         };
 
-        var dateColumns = new HashSet<string>();
-        var numColumns = new HashSet<string>();
-
-        foreach (var header in headers)
+        // Raw text is always kept; typed shadow columns (_date/_num) are added when the column's values support them.
+        foreach (var column in columns)
         {
-            columnDefs.Add($"\"{header}\" TEXT");
-
-            var hasDate = rows.Take(20).Any(r =>
-            {
-                var idx = headers.IndexOf(header);
-                return idx < r.Count && NormalizationService.TryParseDate(r[idx]) != null;
-            });
-            if (hasDate)
-            {
-                columnDefs.Add($"\"{header}_date\" DATE");
-                dateColumns.Add(header);
-            }
-
-            var hasNum = rows.Take(20).Any(r =>
-            {
-                var idx = headers.IndexOf(header);
-                return idx < r.Count && NormalizationService.TryParseAmount(r[idx]) != null;
-            });
-            if (hasNum)
-            {
-                columnDefs.Add($"\"{header}_num\" NUMERIC(18,2)");
-                numColumns.Add(header);
-            }
+            columnDefs.Add($"\"{column.Name}\" TEXT");
+            if (column.IsDate) columnDefs.Add($"\"{column.Name}_date\" DATE");
+            if (column.IsNumeric) columnDefs.Add($"\"{column.Name}_num\" NUMERIC");
         }
 
         columnDefs.Add("row_hash TEXT NOT NULL UNIQUE");
@@ -200,65 +232,58 @@ public class ImportService
         await db.Database.ExecuteSqlRawAsync(sql);
     }
 
-    private static async Task<bool> InsertRow(AppDbContext db, string tableName, List<string> headers, List<string?> values, long datasetId)
+    private static async Task<bool> InsertRow(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        string tableName,
+        List<ColumnProfile> columns,
+        List<string?> values,
+        long datasetId,
+        string rowHash)
     {
         var quotedName = $"\"{tableName}\"";
-        var columns = new List<string> { "dataset_id" };
-        var paramPlaceholders = new List<string> { "$1" };
-        var parameters = new List<NpgsqlParameter>
-        {
-            new() { Value = datasetId }
-        };
+        var names = new List<string> { "dataset_id" };
+        var parameters = new List<NpgsqlParameter> { new() { Value = datasetId } };
 
-        int paramIndex = 2;
-
-        for (int i = 0; i < headers.Count; i++)
+        for (int i = 0; i < columns.Count; i++)
         {
+            var column = columns[i];
             var val = i < values.Count ? values[i] : null;
 
-            columns.Add($"\"{headers[i]}\"");
-            paramPlaceholders.Add($"${paramIndex}");
+            names.Add($"\"{column.Name}\"");
             parameters.Add(new NpgsqlParameter { Value = (object?)val ?? DBNull.Value });
-            paramIndex++;
 
-            var dateVal = NormalizationService.TryParseDate(val);
-            if (dateVal != null)
+            if (column.IsDate)
             {
-                columns.Add($"\"{headers[i]}_date\"");
-                paramPlaceholders.Add($"${paramIndex}");
+                var dateVal = NormalizationService.TryParseDate(val);
+                names.Add($"\"{column.Name}_date\"");
                 parameters.Add(new NpgsqlParameter
                 {
-                    Value = DateOnly.Parse(dateVal),
+                    Value = dateVal != null ? DateOnly.ParseExact(dateVal, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : DBNull.Value,
                     NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Date
                 });
-                paramIndex++;
             }
 
-            var numVal = NormalizationService.TryParseAmount(val);
-            if (numVal != null)
+            if (column.IsNumeric)
             {
-                columns.Add($"\"{headers[i]}_num\"");
-                paramPlaceholders.Add($"${paramIndex}");
-                parameters.Add(new NpgsqlParameter { Value = numVal.Value });
-                paramIndex++;
+                var numVal = NormalizationService.TryParseAmount(val, column.DecimalSeparator);
+                names.Add($"\"{column.Name}_num\"");
+                parameters.Add(new NpgsqlParameter
+                {
+                    Value = (object?)numVal ?? DBNull.Value,
+                    NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Numeric
+                });
             }
         }
 
-        var rowHash = NormalizationService.ComputeRowHash(values);
-        columns.Add("row_hash");
-        paramPlaceholders.Add($"${paramIndex}");
+        names.Add("row_hash");
         parameters.Add(new NpgsqlParameter { Value = rowHash });
 
-        var sql = $"INSERT INTO {quotedName} ({string.Join(", ", columns)}) VALUES ({string.Join(", ", paramPlaceholders)}) ON CONFLICT (row_hash) DO NOTHING";
+        var placeholders = Enumerable.Range(1, parameters.Count).Select(n => $"${n}");
+        var sql = $"INSERT INTO {quotedName} ({string.Join(", ", names)}) VALUES ({string.Join(", ", placeholders)}) ON CONFLICT (row_hash) DO NOTHING";
 
-        var conn = db.Database.GetDbConnection();
-        if (conn.State != System.Data.ConnectionState.Open)
-            await conn.OpenAsync();
-
-        await using var cmd = new NpgsqlCommand(sql, (NpgsqlConnection)conn);
+        await using var cmd = new NpgsqlCommand(sql, conn, tx);
         cmd.Parameters.AddRange(parameters.ToArray());
-        var affected = await cmd.ExecuteNonQueryAsync();
-
-        return affected > 0;
+        return await cmd.ExecuteNonQueryAsync() > 0;
     }
 }

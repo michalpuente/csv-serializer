@@ -24,11 +24,14 @@ A web application for importing malformed bank-style CSV/TXT files into PostgreS
 
 ## Quick Start
 
+The app uses an existing PostgreSQL on the Docker host (Windows, macOS and Linux alike):
+
 ```bash
-docker compose up --build
+cp .env.example .env   # set DB_PASSWORD (and DB_HOST etc. if the database lives elsewhere)
+docker compose up -d --build
 ```
 
-The app will be available at [http://localhost:5000](http://localhost:5000).
+The app is available at [http://localhost:8091/csv-serializer/](http://localhost:8091/csv-serializer/), or at `http://<host>/csv-serializer/` behind docker-gateway. The container restarts automatically with Docker.
 
 ## Development
 

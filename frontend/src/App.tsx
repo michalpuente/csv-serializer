@@ -8,7 +8,7 @@ import './App.css';
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={process.env.PUBLIC_URL}>
       <nav style={{ padding: '12px 20px', background: '#2c3e50', marginBottom: 20 }}>
         <Link to="/" style={{ color: '#ecf0f1', marginRight: 20, textDecoration: 'none', fontWeight: 'bold' }}>
           Upload

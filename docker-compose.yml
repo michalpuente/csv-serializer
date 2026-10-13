@@ -1,29 +1,10 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: csv_serializer
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   app:
     build: .
+    restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "8091:5000"
+    # host.docker.internal resolves to the host on Docker Desktop (macOS/Windows) and, via host-gateway, on Linux
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
-      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=csv_serializer;Username=postgres;Password=postgres"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-volumes:
-  pg_data:
+      ConnectionStrings__DefaultConnection: "Host=${DB_HOST:-host.docker.internal};Port=${DB_PORT:-5432};Database=${DB_NAME:-csv_serializer};Username=${DB_USER:-app};Password=${DB_PASSWORD:?Set DB_PASSWORD in .env (see .env.example)}"
