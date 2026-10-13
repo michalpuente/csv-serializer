@@ -83,6 +83,33 @@ public class DatasetsController : ControllerBase
         });
     }
 
+    /// <summary>Deletes a dataset: its data table, import jobs (with their events) and the catalogue entry.</summary>
+    [HttpDelete("{id:long}")]
+    public async Task<IActionResult> Delete(long id)
+    {
+        var dataset = await _db.ImportedDatasets.FindAsync(id);
+        if (dataset == null) return NotFound(new { error = "Dataset not found." });
+        if (dataset.Status is "queued" or "processing")
+            return Conflict(new { error = "Import is still running; wait for it to finish." });
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+
+        // Another dataset may have re-created the same table (replace import); keep it for that one.
+        var tableShared = await _db.ImportedDatasets.AnyAsync(d => d.Id != id && d.TableName == dataset.TableName);
+        if (!tableShared)
+        {
+            var quoted = "\"" + dataset.TableName.Replace("\"", "\"\"") + "\"";
+            await _db.Database.ExecuteSqlRawAsync($"DROP TABLE IF EXISTS {quoted}");
+        }
+
+        await _db.ImportJobs.Where(j => j.DatasetId == id).ExecuteDeleteAsync();
+        _db.ImportedDatasets.Remove(dataset);
+        await _db.SaveChangesAsync();
+        await tx.CommitAsync();
+
+        return NoContent();
+    }
+
     [HttpGet("{id:long}/rows")]
     public async Task<IActionResult> GetRows(
         long id,

@@ -1,10 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getDatasets } from '../api/client';
+import { deleteDataset, getDatasets } from '../api/client';
 
 export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const handleDelete = async (d: any) => {
+    if (!window.confirm(`Delete dataset "${d.tableName}" and its table? This cannot be undone.`)) return;
+    setDeletingId(d.id);
+    try {
+      await deleteDataset(d.id);
+      setDatasets(prev => prev.filter(x => x.id !== d.id));
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     getDatasets().then(data => {
@@ -30,6 +44,7 @@ export default function DatasetsPage() {
               <th>Status</th>
               <th>Rows (inserted/total)</th>
               <th>Created</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -41,6 +56,15 @@ export default function DatasetsPage() {
                 <td>{d.status}</td>
                 <td>{d.insertedRows}/{d.totalRows}</td>
                 <td>{new Date(d.createdAt).toLocaleString()}</td>
+                <td>
+                  <button
+                    onClick={() => handleDelete(d)}
+                    disabled={deletingId === d.id || d.status === 'queued' || d.status === 'processing'}
+                    style={{ color: '#c0392b' }}
+                  >
+                    {deletingId === d.id ? 'Deleting…' : 'Delete'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

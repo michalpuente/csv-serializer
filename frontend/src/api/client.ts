@@ -82,6 +82,14 @@ export async function getDatasets(): Promise<any[]> {
   return res.json();
 }
 
+export async function deleteDataset(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/datasets/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Delete failed');
+  }
+}
+
 export async function getDataset(id: number): Promise<any> {
   const res = await fetch(`${API_BASE}/datasets/${id}`);
   return res.json();
