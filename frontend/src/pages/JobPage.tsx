@@ -1,14 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getJob } from '../api/client';
+import StatusBadge from '../components/StatusBadge';
+
+const LEVEL_TONES: Record<string, string> = { error: 'badge-danger', warning: 'badge-warn', warn: 'badge-warn' };
 
 export default function JobPage() {
   const { id } = useParams<{ id: string }>();
   const [job, setJob] = useState<any>(null);
   const [error, setError] = useState('');
 
+  const isFinished = job?.status === 'completed' || job?.status === 'failed';
+
   useEffect(() => {
-    if (!id) return;
+    if (!id || isFinished) return;
     const fetchJob = async () => {
       try {
         const data = await getJob(Number(id));
@@ -20,58 +25,68 @@ export default function JobPage() {
     fetchJob();
     const interval = setInterval(fetchJob, 2000);
     return () => clearInterval(interval);
-  }, [id]);
+  }, [id, isFinished]);
 
-  if (error) return <div style={{ color: 'red' }}>{error}</div>;
-  if (!job) return <div>Loading...</div>;
+  if (error) return <div className="alert alert-error">{error}</div>;
+  if (!job) return <div className="muted">Loading…</div>;
 
-  const isFinished = job.status === 'completed' || job.status === 'failed';
+  const stats: [string, number][] = [
+    ['Scanned', job.rowsScanned],
+    ['Normalized', job.rowsNormalized],
+    ['Inserted', job.rowsInserted],
+    ['Duplicates', job.rowsDuplicates],
+    ['Invalid', job.rowsInvalid]
+  ];
 
   return (
-    <div>
-      <h2>Import Job #{job.id}</h2>
-      <p>
-        Status: <strong>{job.status}</strong>
-        {job.errorMessage && <span style={{ color: 'red' }}> — {job.errorMessage}</span>}
-      </p>
-
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ background: '#eee', borderRadius: 4, overflow: 'hidden', height: 24 }}>
-          <div
-            style={{
-              width: `${job.progressPercent}%`,
-              background: job.status === 'failed' ? '#e74c3c' : '#2ecc71',
-              height: '100%',
-              transition: 'width 0.3s'
-            }}
-          />
+    <div className="stack">
+      <div className="page-header">
+        <div>
+          <h2>Import job #{job.id}</h2>
+          <p className="row"><StatusBadge status={job.status} /></p>
         </div>
-        <small>{job.progressPercent}%</small>
+        {isFinished && job.datasetId > 0 && (
+          <Link to={`/datasets/${job.datasetId}`} className="btn btn-primary">Open dataset →</Link>
+        )}
       </div>
 
-      <table border={1} cellPadding={4} style={{ borderCollapse: 'collapse', marginBottom: 16 }}>
-        <tbody>
-          <tr><td>Rows scanned</td><td>{job.rowsScanned}</td></tr>
-          <tr><td>Rows normalized</td><td>{job.rowsNormalized}</td></tr>
-          <tr><td>Rows inserted</td><td>{job.rowsInserted}</td></tr>
-          <tr><td>Duplicates</td><td>{job.rowsDuplicates}</td></tr>
-          <tr><td>Invalid</td><td>{job.rowsInvalid}</td></tr>
-        </tbody>
-      </table>
+      {job.errorMessage && <div className="alert alert-error">{job.errorMessage}</div>}
 
-      {isFinished && job.datasetId > 0 && (
-        <p><Link to={`/datasets/${job.datasetId}`}>View Dataset →</Link></p>
-      )}
+      <div className="card">
+        <div className="card-header" style={{ marginBottom: 8 }}>
+          <span className="label">Progress</span>
+          <strong>{job.progressPercent}%</strong>
+        </div>
+        <div className="progress">
+          <div className={`progress-bar${job.status === 'failed' ? ' failed' : ''}`} style={{ width: `${job.progressPercent}%` }} />
+        </div>
+      </div>
 
-      <h3>Events</h3>
-      <ul>
-        {job.events?.map((evt: any) => (
-          <li key={evt.id}>
-            <small>[{evt.level}]</small> {evt.message}
-            <small style={{ color: '#888' }}> — {new Date(evt.createdAt).toLocaleTimeString()}</small>
-          </li>
+      <div className="stats">
+        {stats.map(([label, value]) => (
+          <div className="stat" key={label}>
+            <div className="stat-label">{label}</div>
+            <div className="stat-value">{(value ?? 0).toLocaleString()}</div>
+          </div>
         ))}
-      </ul>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><h3>Events</h3></div>
+        {job.events?.length ? (
+          <ul className="events">
+            {job.events.map((evt: any) => (
+              <li key={evt.id}>
+                <span className={`badge ${LEVEL_TONES[String(evt.level).toLowerCase()] || ''}`}>{evt.level}</span>
+                <span>{evt.message}</span>
+                <span className="time">{new Date(evt.createdAt).toLocaleTimeString()}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="muted">No events yet.</div>
+        )}
+      </div>
     </div>
   );
 }

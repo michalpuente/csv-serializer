@@ -48,10 +48,27 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
-using (var scope = app.Services.CreateScope())
+// The database may still be starting (e.g. after a host reboot): retry instead of crashing on the first attempt
+for (var attempt = 1; ; attempt++)
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.MigrateAsync();
+        break;
+    }
+    catch (Exception ex) when (attempt < 30)
+    {
+        app.Logger.LogWarning("Database not reachable (attempt {Attempt}/30): {Message}", attempt, ex.Message);
+        await Task.Delay(TimeSpan.FromSeconds(Math.Min(2 * attempt, 10)));
+    }
+    catch (Exception ex)
+    {
+        // Exit so Docker's restart policy can start a fresh container instead of leaving a dead process behind
+        app.Logger.LogCritical(ex, "Database migration failed, exiting");
+        Environment.Exit(1);
+    }
 }
 
 // Served behind docker-gateway at /csv-serializer; requests without the prefix still work

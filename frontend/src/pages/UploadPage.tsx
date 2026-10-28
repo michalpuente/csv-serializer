@@ -1,6 +1,7 @@
-import React, { useState, FormEvent } from 'react';
+import React, { useState, FormEvent, DragEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { previewFile, startImport, getDatasets } from '../api/client';
+import StatusBadge from '../components/StatusBadge';
 
 export default function UploadPage() {
   const navigate = useNavigate();
@@ -9,6 +10,7 @@ export default function UploadPage() {
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [preview, setPreview] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
   const [datasets, setDatasets] = useState<any[]>([]);
 
@@ -17,6 +19,21 @@ export default function UploadPage() {
       .then(data => setDatasets(data || []))
       .catch(() => setDatasets([]));
   }, []);
+
+  const chooseFile = (f: File | null) => {
+    setFile(f);
+    setPreview(null);
+    if (f && !tableName) {
+      // Suggest a table name from the file name
+      setTableName(f.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''));
+    }
+  };
+
+  const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setDragging(false);
+    chooseFile(e.dataTransfer.files?.[0] || null);
+  };
 
   const handlePreview = async () => {
     if (!file) return;
@@ -46,100 +63,121 @@ export default function UploadPage() {
   };
 
   return (
-    <div>
-      <h2>Import CSV / TXT File</h2>
-      <form onSubmit={handleImport}>
-        <div style={{ marginBottom: 12 }}>
-          <label>File (CSV or TXT): </label>
-          <input
-            type="file"
-            accept=".csv,.txt"
-            onChange={e => setFile(e.target.files?.[0] || null)}
-            required
-          />
+    <div className="stack">
+      <div className="page-header">
+        <div>
+          <h2>Import a file</h2>
+          <p>Upload a CSV or TXT export – encoding, delimiter and header row are detected automatically.</p>
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <label>Target table name: </label>
-          <input
-            type="text"
-            value={tableName}
-            onChange={e => setTableName(e.target.value)}
-            required
-            placeholder="e.g. bank_transactions_2026"
-          />
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label>
+      </div>
+
+      <form className="card stack" onSubmit={handleImport}>
+        <label
+          className={`dropzone${dragging ? ' dragging' : ''}`}
+          onDragOver={e => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+        >
+          <input type="file" accept=".csv,.txt" onChange={e => chooseFile(e.target.files?.[0] || null)} />
+          <div className="dropzone-title">Drop a file here or click to browse</div>
+          <div className="muted small">.csv or .txt</div>
+          {file && <div className="dropzone-file">{file.name} · {(file.size / 1024).toFixed(1)} KB</div>}
+        </label>
+
+        <div className="form-grid">
+          <div className="field">
+            <label htmlFor="tableName">Target table name</label>
             <input
-              type="checkbox"
-              checked={replaceExisting}
-              onChange={e => setReplaceExisting(e.target.checked)}
+              id="tableName"
+              type="text"
+              value={tableName}
+              onChange={e => setTableName(e.target.value)}
+              required
+              placeholder="e.g. bank_transactions_2026"
             />
-            {' '}Replace existing table
-          </label>
+          </div>
+          <div className="field" style={{ justifyContent: 'flex-end' }}>
+            <label className="checkbox" style={{ minHeight: 36 }}>
+              <input
+                type="checkbox"
+                checked={replaceExisting}
+                onChange={e => setReplaceExisting(e.target.checked)}
+              />
+              Replace existing table
+            </label>
+          </div>
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <button type="button" onClick={handlePreview} disabled={!file || loading}>
+
+        {error && <div className="alert alert-error">{error}</div>}
+
+        <div className="row">
+          <button className="btn btn-primary" type="submit" disabled={!file || !tableName || loading}>
+            {loading ? 'Working…' : 'Start import'}
+          </button>
+          <button className="btn" type="button" onClick={handlePreview} disabled={!file || loading}>
             Preview
-          </button>{' '}
-          <button type="submit" disabled={!file || !tableName || loading}>
-            Start Import
           </button>
         </div>
       </form>
 
-      {error && <div style={{ color: 'red', marginBottom: 12 }}>{error}</div>}
-
       {preview && (
-        <div>
-          <h3>Preview</h3>
-          <p>Encoding: {preview.encoding} | Delimiter: "{preview.delimiter}" | Header line: {preview.headerLineIndex}</p>
-          <table border={1} cellPadding={4} style={{ borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {preview.normalizedHeaders.map((h: string) => <th key={h}>{h}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {preview.sampleRows.map((row: any[], i: number) => (
-                <tr key={i}>
-                  {row.map((cell: any, j: number) => <td key={j}>{cell ?? ''}</td>)}
+        <div className="card flush">
+          <div className="card-header">
+            <h3>Preview</h3>
+            <div className="row small muted">
+              <span>Encoding <strong>{preview.encoding}</strong></span>
+              <span>· Delimiter <code>{preview.delimiter}</code></span>
+              <span>· Header line <strong>{preview.headerLineIndex}</strong></span>
+            </div>
+          </div>
+          <div className="table-wrap" style={{ marginTop: 14 }}>
+            <table className="table dense">
+              <thead>
+                <tr>
+                  {preview.normalizedHeaders.map((h: string) => <th key={h}>{h}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {preview.sampleRows.map((row: any[], i: number) => (
+                  <tr key={i}>
+                    {row.map((cell: any, j: number) => <td key={j}>{cell ?? ''}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      <div style={{ marginTop: 24 }}>
-        <h3>Previously Imported Datasets</h3>
+      <div className="card flush">
+        <div className="card-header">
+          <h3>Recent datasets</h3>
+          <Link to="/datasets" className="small">View all →</Link>
+        </div>
         {datasets.length === 0 ? (
-          <p>No datasets yet.</p>
+          <div className="empty">No datasets yet.</div>
         ) : (
-          <table border={1} cellPadding={4} style={{ borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Table Name</th>
-                <th>Status</th>
-                <th>Rows</th>
-              </tr>
-            </thead>
-            <tbody>
-              {datasets.slice(0, 10).map(d => (
-                <tr key={d.id}>
-                  <td>{d.id}</td>
-                  <td><Link to={`/datasets/${d.id}`}>{d.tableName}</Link></td>
-                  <td>{d.status}</td>
-                  <td>{d.insertedRows}/{d.totalRows}</td>
+          <div className="table-wrap" style={{ marginTop: 14 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Table</th>
+                  <th>Status</th>
+                  <th className="num">Rows</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {datasets.slice(0, 10).map(d => (
+                  <tr key={d.id}>
+                    <td><Link to={`/datasets/${d.id}`}>{d.tableName}</Link></td>
+                    <td><StatusBadge status={d.status} /></td>
+                    <td className="num">{d.insertedRows.toLocaleString()} / {d.totalRows.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-        <p style={{ marginTop: 8 }}>
-          <Link to="/datasets">View all datasets {'->'}</Link>
-        </p>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, FormEvent } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import {
   DatasetFilterParams,
   applyRepairDefaults,
@@ -107,12 +107,6 @@ export default function DatasetDetailPage() {
     getRepairSuggestions(Number(id)).then(setRepairInfo).catch(() => setRepairInfo(null));
   }, [id]);
 
-  const handleSearch = (e: FormEvent) => {
-    e.preventDefault();
-    setOffset(0);
-    fetchData();
-  };
-
   const handleApplyFilters = async (e: FormEvent) => {
     e.preventDefault();
     setOffset(0);
@@ -170,196 +164,217 @@ export default function DatasetDetailPage() {
     }
   };
 
-  if (loading && !dataset) return <div>Loading...</div>;
-  if (error) return <div style={{ color: 'red' }}>{error}</div>;
-  if (!dataset) return <div>Dataset not found.</div>;
+  if (loading && !dataset) return <div className="muted">Loading…</div>;
+  if (error) return <div className="alert alert-error">{error}</div>;
+  if (!dataset) return <div className="empty">Dataset not found.</div>;
 
   const headers: string[] = dataset.headerRowJson || [];
   const csvUrl = getFilteredRowsCsvUrl(Number(id), { ...filterParams, limit: undefined, offset: undefined });
+  const numericColumns: string[] = analytics?.availableNumericColumns || [];
+  const dateColumns: string[] = analytics?.availableDateColumns || [];
+
+  const stats: [string, React.ReactNode][] = [
+    ['Rows inserted', `${dataset.insertedRows.toLocaleString()} / ${dataset.totalRows.toLocaleString()}`],
+    ['After filters', filteredRows.toLocaleString()],
+    ['Duplicates', dataset.duplicateRows.toLocaleString()],
+    ['Invalid', dataset.invalidRows.toLocaleString()],
+    ['Columns filled', `${analytics?.columnsWithAnyValue ?? '-'} / ${analytics?.columnsTotal ?? '-'}`]
+  ];
 
   return (
-    <div>
-      <h2>Dataset: {dataset.tableName}</h2>
-      <p>
-        File: {dataset.originalFilename} | Encoding: {dataset.detectedEncoding} |
-        Rows: {dataset.insertedRows}/{dataset.totalRows} |
-        Duplicates: {dataset.duplicateRows} | Invalid: {dataset.invalidRows}
-      </p>
-      <p>
-        <a href={getSummaryCsvUrl(Number(id))} download>Download Summary CSV</a>
-        {' | '}
-        <a href={csvUrl} download>Download Filtered Rows CSV</a>
-      </p>
+    <div className="stack">
+      <div className="page-header">
+        <div>
+          <div className="small muted"><Link to="/datasets">Datasets</Link> /</div>
+          <h2 className="mono">{dataset.tableName}</h2>
+          <p>{dataset.originalFilename} · {dataset.detectedEncoding}</p>
+        </div>
+        <div className="row">
+          <a className="btn" href={getSummaryCsvUrl(Number(id))} download>Summary CSV</a>
+          <a className="btn btn-primary" href={csvUrl} download>Export filtered rows</a>
+        </div>
+      </div>
 
-      <form onSubmit={handleSearch} style={{ marginBottom: 12 }}>
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search across all columns..."
-          style={{ width: 300, marginRight: 8 }}
-        />
-        <button type="submit">Search</button>
+      <div className="stats">
+        {stats.map(([label, value]) => (
+          <div className="stat" key={label}>
+            <div className="stat-label">{label}</div>
+            <div className="stat-value">{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <form className="card" onSubmit={handleApplyFilters}>
+        <div className="card-header">
+          <h3>Search &amp; filters</h3>
+          <div className="row">
+            <button className="btn btn-sm" type="button" onClick={resetFilters}>Reset</button>
+          </div>
+        </div>
+        <div className="stack">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search across all columns…"
+          />
+          <div className="form-grid">
+            <div className="field">
+              <label>Text column</label>
+              <select value={textColumn} onChange={e => setTextColumn(e.target.value)}>
+                <option value="">(disabled)</option>
+                {headers.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Match</label>
+              <select value={textMode} onChange={e => setTextMode(e.target.value as any)}>
+                <option value="contains">contains</option>
+                <option value="equals">equals</option>
+                <option value="startsWith">starts with</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Text value</label>
+              <input value={textValue} onChange={e => setTextValue(e.target.value)} disabled={!textColumn} />
+            </div>
+            <div className="field">
+              <label>Date column</label>
+              <select value={dateColumn} onChange={e => setDateColumn(e.target.value)}>
+                <option value="">(disabled)</option>
+                {dateColumns.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Date from</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} disabled={!dateColumn} />
+            </div>
+            <div className="field">
+              <label>Date to</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} disabled={!dateColumn} />
+            </div>
+            <div className="field">
+              <label>Numeric column</label>
+              <select value={numColumn} onChange={e => setNumColumn(e.target.value)}>
+                <option value="">(disabled)</option>
+                {numericColumns.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Min</label>
+              <input value={numMin} onChange={e => setNumMin(e.target.value)} placeholder="e.g. -1000" disabled={!numColumn} />
+            </div>
+            <div className="field">
+              <label>Max</label>
+              <input value={numMax} onChange={e => setNumMax(e.target.value)} placeholder="e.g. 5000" disabled={!numColumn} />
+            </div>
+          </div>
+          <div className="row">
+            <button className="btn btn-primary" type="submit">Apply</button>
+          </div>
+        </div>
       </form>
 
-      <form onSubmit={handleApplyFilters} style={{ border: '1px solid #ddd', padding: 12, marginBottom: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Filters</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
-          <div>
-            <label>Text column</label>
-            <select value={textColumn} onChange={e => setTextColumn(e.target.value)} style={{ width: '100%' }}>
-              <option value="">(disabled)</option>
+      <div className="grid-2">
+        <div className="card">
+          <div className="card-header"><h3>Aggregate</h3></div>
+          <div className="row">
+            <select value={operation} onChange={e => setOperation(e.target.value as any)}>
+              <option value="sum">sum</option>
+              <option value="avg">avg</option>
+              <option value="min">min</option>
+              <option value="max">max</option>
+              <option value="count">count</option>
+              <option value="countdistinct">count distinct</option>
+            </select>
+            <select value={operationColumn} onChange={e => setOperationColumn(e.target.value)} disabled={operation === 'count'}>
+              {(numericColumns.length ? numericColumns : headers).map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+            <button className="btn" type="button" onClick={runOperationAction}>Run</button>
+          </div>
+          {operationResult && (
+            <div className="stat" style={{ marginTop: 12 }}>
+              <div className="stat-label">{operation}{operation !== 'count' ? ` of ${operationColumn}` : ''} (filtered rows)</div>
+              <div className="stat-value">{String(operationResult.value)}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <h3>Repair text</h3>
+            <button className="btn btn-sm" type="button" onClick={applyDefaultRepair}>Apply Polish defaults</button>
+          </div>
+          <div className="row">
+            <select value={repairColumn} onChange={e => setRepairColumn(e.target.value)}>
               {headers.map(h => <option key={h} value={h}>{h}</option>)}
             </select>
+            <input value={repairFind} onChange={e => setRepairFind(e.target.value)} placeholder="Find" />
+            <input value={repairReplace} onChange={e => setRepairReplace(e.target.value)} placeholder="Replace with" />
+            <button className="btn" type="button" onClick={applyCustomRepair} disabled={!repairFind}>Apply</button>
           </div>
-          <div>
-            <label>Text mode</label>
-            <select value={textMode} onChange={e => setTextMode(e.target.value as any)} style={{ width: '100%' }}>
-              <option value="contains">contains</option>
-              <option value="equals">equals</option>
-              <option value="startsWith">startsWith</option>
+          {!!repairInfo?.samples?.length && (
+            <div style={{ marginTop: 12 }}>
+              <div className="label" style={{ marginBottom: 6 }}>Detected broken values</div>
+              <ul className="events">
+                {repairInfo.samples.map((s: any, i: number) => (
+                  <li key={`${s.column}-${i}`}>
+                    <span className="badge">{s.column}</span>
+                    <span className="mono">{s.value}</span>
+                    <span className="time">×{s.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {actionInfo && <div className="alert alert-info">{actionInfo}</div>}
+
+      <div className="card flush">
+        <div className="card-header">
+          <h3>Rows</h3>
+          <div className="row">
+            <span className="label">Sort</span>
+            <select value={sort} onChange={e => { setSort(e.target.value); setOffset(0); }}>
+              <option value="id">id</option>
+              {Array.from(new Set([...headers, ...numericColumns, ...dateColumns])).map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+            <select value={direction} onChange={e => setDirection(e.target.value as any)}>
+              <option value="asc">ascending</option>
+              <option value="desc">descending</option>
             </select>
           </div>
-          <div>
-            <label>Text value</label>
-            <input value={textValue} onChange={e => setTextValue(e.target.value)} style={{ width: '100%' }} />
-          </div>
-          <div>
-            <label>Date column</label>
-            <select value={dateColumn} onChange={e => setDateColumn(e.target.value)} style={{ width: '100%' }}>
-              <option value="">(disabled)</option>
-              {(analytics?.availableDateColumns || []).map((h: string) => <option key={h} value={h}>{h}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Date from</label>
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width: '100%' }} />
-          </div>
-          <div>
-            <label>Date to</label>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: '100%' }} />
-          </div>
-          <div>
-            <label>Numeric column</label>
-            <select value={numColumn} onChange={e => setNumColumn(e.target.value)} style={{ width: '100%' }}>
-              <option value="">(disabled)</option>
-              {(analytics?.availableNumericColumns || []).map((h: string) => <option key={h} value={h}>{h}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Min</label>
-            <input value={numMin} onChange={e => setNumMin(e.target.value)} placeholder="e.g. -1000" style={{ width: '100%' }} />
-          </div>
-          <div>
-            <label>Max</label>
-            <input value={numMax} onChange={e => setNumMax(e.target.value)} placeholder="e.g. 5000" style={{ width: '100%' }} />
-          </div>
         </div>
-        <div style={{ marginTop: 8 }}>
-          <button type="submit">Apply Filters</button>{' '}
-          <button type="button" onClick={resetFilters}>Reset Filters</button>
-        </div>
-      </form>
-
-      <div style={{ marginBottom: 12 }}>
-        <label>Sort by: </label>
-        <select value={sort} onChange={e => { setSort(e.target.value); setOffset(0); }}>
-          <option value="id">id</option>
-          {headers.map(h => <option key={h} value={h}>{h}</option>)}
-          {(analytics?.availableNumericColumns || []).map((h: string) => <option key={h} value={h}>{h}</option>)}
-          {(analytics?.availableDateColumns || []).map((h: string) => <option key={h} value={h}>{h}</option>)}
-        </select>
-        {' '}
-        <select value={direction} onChange={e => setDirection(e.target.value as any)}>
-          <option value="asc">asc</option>
-          <option value="desc">desc</option>
-        </select>
-      </div>
-
-      <div style={{ border: '1px solid #ddd', padding: 12, marginBottom: 12 }}>
-        <h3 style={{ marginTop: 0 }}>View Stats</h3>
-        <p style={{ margin: 0 }}>
-          Rows: filtered {filteredRows} / total {analytics?.rowsTotal ?? '-'} | 
-          Columns: total {analytics?.columnsTotal ?? '-'} | filled {analytics?.columnsWithAnyValue ?? '-'} | all null {analytics?.columnsAllNull ?? '-'}
-        </p>
-      </div>
-
-      <div style={{ border: '1px solid #ddd', padding: 12, marginBottom: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Operations</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <select value={operation} onChange={e => setOperation(e.target.value as any)}>
-            <option value="sum">sum</option>
-            <option value="avg">avg</option>
-            <option value="min">min</option>
-            <option value="max">max</option>
-            <option value="count">count</option>
-            <option value="countdistinct">countdistinct</option>
-          </select>
-          <select value={operationColumn} onChange={e => setOperationColumn(e.target.value)} disabled={operation === 'count'}>
-            {(analytics?.availableNumericColumns || headers).map((h: string) => <option key={h} value={h}>{h}</option>)}
-          </select>
-          <button type="button" onClick={runOperationAction}>Run Operation</button>
-        </div>
-        {operationResult && (
-          <p style={{ marginBottom: 0 }}>
-            Result: <strong>{String(operationResult.value)}</strong>
-          </p>
-        )}
-      </div>
-
-      <div style={{ border: '1px solid #ddd', padding: 12, marginBottom: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Repair Text</h3>
-        <button type="button" onClick={applyDefaultRepair}>Apply Default Polish Repairs</button>
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <select value={repairColumn} onChange={e => setRepairColumn(e.target.value)}>
-            {headers.map(h => <option key={h} value={h}>{h}</option>)}
-          </select>
-          <input value={repairFind} onChange={e => setRepairFind(e.target.value)} placeholder="Find text" />
-          <input value={repairReplace} onChange={e => setRepairReplace(e.target.value)} placeholder="Replace with" />
-          <button type="button" onClick={applyCustomRepair} disabled={!repairFind}>Apply Custom Repair</button>
-        </div>
-        {!!repairInfo?.samples?.length && (
-          <div style={{ marginTop: 10 }}>
-            <strong>Detected broken samples:</strong>
-            <ul>
-              {repairInfo.samples.map((s: any, i: number) => (
-                <li key={`${s.column}-${i}`}>{s.column}: {s.value} ({s.count})</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      {actionInfo && <div style={{ marginBottom: 10, color: '#2c3e50' }}>{actionInfo}</div>}
-
-      <div style={{ overflowX: 'auto' }}>
-        <table border={1} cellPadding={4} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr>
-              <th>id</th>
-              {headers.map(h => <th key={h}>{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={row.id || i}>
-                <td>{row.id}</td>
-                {headers.map(h => <td key={h}>{row[h] ?? ''}</td>)}
+        <div className="table-wrap" style={{ marginTop: 14 }}>
+          <table className="table dense">
+            <thead>
+              <tr>
+                <th className="num">id</th>
+                {headers.map(h => <th key={h}>{h}</th>)}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <small>Showing {rows.length} rows on this page, {filteredRows} after filters.</small>
-        <br />
-        {offset > 0 && (
-          <button onClick={() => setOffset(Math.max(0, offset - limit))}>← Previous</button>
-        )}{' '}
-        {rows.length === limit && (
-          <button onClick={() => setOffset(offset + limit)}>Next →</button>
-        )}
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={row.id || i}>
+                  <td className="num muted">{row.id}</td>
+                  {headers.map(h => <td key={h} title={row[h] ?? ''}>{row[h] ?? ''}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 && <div className="empty">No rows match the current filters.</div>}
+        </div>
+        <div className="pager">
+          <span className="small muted">
+            {rows.length ? `${offset + 1}–${offset + rows.length}` : '0'} of {filteredRows.toLocaleString()}
+          </span>
+          <div className="row">
+            <button className="btn btn-sm" onClick={() => setOffset(Math.max(0, offset - limit))} disabled={offset === 0}>← Previous</button>
+            <button className="btn btn-sm" onClick={() => setOffset(offset + limit)} disabled={rows.length < limit}>Next →</button>
+          </div>
+        </div>
       </div>
     </div>
   );

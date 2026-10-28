@@ -7,4 +7,6 @@ services:
     # host.docker.internal resolves to the host on Docker Desktop (macOS/Windows) and, via host-gateway, on Linux
     extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
+      # Container networks have no IPv6 route; without this host.docker.internal can resolve to an unreachable IPv6 address
+      DOTNET_SYSTEM_NET_DISABLEIPV6: "1"
       ConnectionStrings__DefaultConnection: "Host=${DB_HOST:-host.docker.internal};Port=${DB_PORT:-5432};Database=${DB_NAME:-csv_serializer};Username=${DB_USER:-app};Password=${DB_PASSWORD:?Set DB_PASSWORD in .env (see .env.example)}"
